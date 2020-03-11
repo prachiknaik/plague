@@ -1,0 +1,83 @@
+---
+title: "National Election Survey"
+author: "David Kane"
+output:
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+library(rstanarm)
+library(tidybayes)
+library(tidyverse)
+library(loo)
+
+load("nes.rda")
+```
+
+```{r clean_data}
+# This data is a mess. Where is the code book? Is this real NES data or some bs
+# made up sample? This is a really good place to write down some thoughts on
+# this data and where it comes from. Take a look at ROAS, pages 141 -- 142.
+
+# We are trying to explain partyid7, which is the party identification of each
+# respondent. Can we treat this as continuous? I think that lower numbers mean
+# more Democratic.
+
+# real_ideo is missing a lot. Should we just get rid of those rows? Depends on
+# the time period we care about . . .
+
+x <- nes %>% 
+  as_tibble() %>% 
+  select(year, partyid7, real_ideo, race_adj, 
+         age_discrete, educ1, female, income) %>% 
+  drop_na() %>% 
+  mutate(gender = as.factor(ifelse(female == 1, "female", "non-female"))) %>% 
+  mutate(race = as.factor(case_when(race_adj == 1 ~ "White",
+                                    race_adj == 2 ~ "Black",
+                                    TRUE ~ "Other"))) %>% 
+  select(-female, -race_adj)
+  
+```
+
+```{r model_1, cache=TRUE}
+fit_1 <- stan_glm(data = x, partyid7 ~ gender + race + real_ideo, refresh = 0)
+
+```
+
+```{r show_model, comment=NA}
+fit_1
+
+## difference between stan_glm and lm: 
+
+## overfitting the model-- when your model fits too well to one particular dataset but is less generalizable. in order to fix this: k-fold method. split the data into k partitions, rotate through each subset of 9, leave one subset out. All the way down to leave one datapoint out. 
+```
+
+
+# how well does a model fit? calculate leave-one-out
+```{r, loo_1, cache=TRUE}
+loo_1 <- loo(fit_1)
+
+# looic = 2x elpd_loo. what is p_loo. How good the model is is how far from the truth our model is. p_loo is a measure of how correlated the right hand side variables are. how good a model is: your guess, vs the truth. the closer, the better. the farther, the worse. no lower or higher is better for p_loo, just depends on what you feed in. 
+```
+
+#make a different linear model, maybe with different regressors.
+```{r, fit_2, cache=TRUE}
+fit_2 <- stan_glm(data = x, partyid7 ~ educ1 + income, refresh = 0) 
+
+```
+
+# now check model 2 fit
+```{r, loo_2, cache=TRUE}
+
+loo_2 <- loo(fit_2)
+
+# ploo supposed to be estimated effective number of paramaters NOT variables: intercept and error count as parameters in addition to unknowns. telling you about the complexity of your model. higher number = more complexity. 
+```
+
+```{r}
+loo_compare(loo_2, loo_1)
+
+#how to interpret: loo_compare sets the better function (the one with the elpd_loo closer to zero bc that means error is smaller) as 0 and then the elpd_diff for the second is calculated from that. so the elpd_diff is saying fit 2 differs from fit 1 this much. there is SOME indicator of this in sigma of the glm  
+```
+
